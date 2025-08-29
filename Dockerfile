@@ -41,7 +41,7 @@ RUN python3 -m venv /opt/pangu-venv \
 # --- Runtime helper: activate env + set LD_LIBRARY_PATH for ORT CUDA ---------
 RUN cat >/usr/local/bin/activate_pangu.sh <<'SH'
 #!/usr/bin/env bash
-set -euo pipefail
+# set -euo pipefail   this should go for easier ssh
 # Activate the baked venv
 source /opt/pangu-venv/bin/activate
 # Discover ONNX Runtime–bundled NVIDIA libs (cudnn/cublas etc.) and export

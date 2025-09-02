@@ -23,21 +23,22 @@ RUN git clone --branch 2.41.1 --depth 1 https://github.com/ecmwf/eccodes.git \
  && make -j"$(nproc)" && make install && ldconfig \
  && cd / && rm -rf /tmp/eccodes
 
-# --- Python env --------------------------------------------------------------
+# --- Python venv + packages (install Jupyter into the venv) ------------------
 RUN python3 -m venv /opt/pangu-venv \
  && /opt/pangu-venv/bin/pip install --upgrade pip setuptools wheel \
  && /opt/pangu-venv/bin/pip install --no-cache-dir \
       "onnxruntime-gpu[cuda,cudnn]" \
       ai-models ai-models-panguweather ai-models-panguweather-gfs \
-      matplotlib basemap \
- && python3 -m pip install --no-cache-dir jupyterlab
+      matplotlib basemap jupyterlab
 
-# --- Runtime helper ----------------------------------------------------------
-RUN cat >/usr/local/bin/activate_pangu.sh <<'SH'
+# --- Runtime helper: activate env & set LD_LIBRARY_PATH ----------------------
+RUN <<'BASH'
+set -eux
+cat >/usr/local/bin/activate_pangu.sh <<'SH'
 #!/usr/bin/env bash
 # Activate the baked venv
 source /opt/pangu-venv/bin/activate
-# Export ORT CUDA libs into LD_LIBRARY_PATH
+# Discover ONNX Runtime–bundled NVIDIA libs and export
 NVIDIA_LIBS_DIRS="$(python - <<'PY'
 import site,glob,os
 sp = site.getsitepackages()[0]
@@ -48,19 +49,24 @@ PY
 export LD_LIBRARY_PATH="${NVIDIA_LIBS_DIRS}:${LD_LIBRARY_PATH:-}"
 echo "[activate_pangu] Pangu environment ready."
 SH
-RUN chmod +x /usr/local/bin/activate_pangu.sh \
- && echo 'source /usr/local/bin/activate_pangu.sh' >/etc/profile.d/pangu.sh
+chmod +x /usr/local/bin/activate_pangu.sh
+echo 'source /usr/local/bin/activate_pangu.sh' >/etc/profile.d/pangu.sh
+BASH
 
 # --- SSH user and server -----------------------------------------------------
-RUN useradd -m -s /bin/bash runpod \
- && mkdir -p /home/runpod/.ssh /var/run/sshd \
- && chmod 700 /home/runpod/.ssh \
- && chown -R runpod:runpod /home/runpod/.ssh \
- && sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config \
- && sed -i 's/^#\?PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config \
- && sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
+RUN <<'BASH'
+set -eux
+useradd -m -s /bin/bash runpod
+mkdir -p /home/runpod/.ssh /var/run/sshd
+chmod 700 /home/runpod/.ssh
+chown -R runpod:runpod /home/runpod/.ssh
+# Hardened sshd defaults: key-only login, no root password login
+sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+sed -i 's/^#\?PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
+sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
+BASH
 
-# nginx: proxy HTTP :80 -> Jupyter :8888
+# --- nginx: proxy HTTP :80 -> Jupyter :8888 ----------------------------------
 RUN <<'BASH'
 set -eux
 mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
@@ -81,42 +87,43 @@ rm -f /etc/nginx/sites-enabled/default || true
 ln -sf /etc/nginx/sites-available/jupyter.conf /etc/nginx/sites-enabled/jupyter.conf
 BASH
 
+# --- Boot script: inject PUBLIC_KEY, set Jupyter, start services -------------
+RUN <<'BASH'
+set -eux
+cat > /usr/local/bin/runpod-start.sh <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
 
-# --- Boot script: inject PUBLIC_KEY, set Jupyter auth, start services --------
-RUN bash -lc 'cat > /usr/local/bin/runpod-start.sh << "SH"\n\
-#!/usr/bin/env bash\n\
-set -euo pipefail\n\
-# 1) SSH key injection (optional via env PUBLIC_KEY)\n\
-if [[ -n \"${PUBLIC_KEY:-}\" ]]; then\n\
-  install -d -m 700 -o runpod -g runpod /home/runpod/.ssh\n\
-  if ! grep -q \"$PUBLIC_KEY\" /home/runpod/.ssh/authorized_keys 2>/dev/null; then\n\
-    echo \"$PUBLIC_KEY\" >> /home/runpod/.ssh/authorized_keys\n\
-  fi\n\
-  chown runpod:runpod /home/runpod/.ssh/authorized_keys\n\
-  chmod 600 /home/runpod/.ssh/authorized_keys\n\
-fi\n\
-# 2) Jupyter auth config\n\
-JUPYTER_ARGS=(\"--ServerApp.ip=0.0.0.0\" \"--ServerApp.port=8888\" \"--ServerApp.allow_origin=*\" \"--ServerApp.root_dir=/workspace\" \"--ServerApp.allow_remote_access=True\" \"--ServerApp.open_browser=False\")\n\
-if [[ -n \"${JUPYTER_PASSWORD:-}\" ]]; then\n\
-  HASH=$(python3 - <<PY\n\
-from notebook.auth import passwd\n\
-import os\n\
-print(passwd(os.environ.get(\"JUPYTER_PASSWORD\"), algorithm=\"sha1\"))\n\
-PY\n\
-  )\n\
-  JUPYTER_ARGS+=(\"--ServerApp.password=${HASH}\")\n\
-else\n\
-  # tokenless; set JUPYTER_PASSWORD in template to enforce a password\n\
-  JUPYTER_ARGS+=(\"--ServerApp.token=\")\n\
-fi\n\
-# 3) Start services\n\
-/usr/sbin/sshd\n\
-# Jupyter under runpod user\n\
-sudo -u runpod -E bash -lc \"mkdir -p /workspace; source /usr/local/bin/activate_pangu.sh 2>/dev/null || true; jupyter lab ${JUPYTER_ARGS[@]}\" &\n\
-# nginx in foreground so container stays up\n\
-exec nginx -g \"daemon off;\"\n\
-SH\n\
-&& chmod +x /usr/local/bin/runpod-start.sh'
+# 1) SSH key injection (optional via env PUBLIC_KEY)
+if [[ -n "${PUBLIC_KEY:-}" ]]; then
+  install -d -m 700 -o runpod -g runpod /home/runpod/.ssh
+  if ! grep -qF "$PUBLIC_KEY" /home/runpod/.ssh/authorized_keys 2>/dev/null; then
+    echo "$PUBLIC_KEY" >> /home/runpod/.ssh/authorized_keys
+  fi
+  chown runpod:runpod /home/runpod/.ssh/authorized_keys
+  chmod 600 /home/runpod/.ssh/authorized_keys
+fi
+
+# 2) Jupyter auth & options (use token to avoid hashing complexity)
+JUPYTER_ARGS=(--ServerApp.ip=0.0.0.0 --ServerApp.port=8888 --ServerApp.allow_origin=* \
+              --ServerApp.root_dir=/workspace --ServerApp.allow_remote_access=True --ServerApp.open_browser=False)
+if [[ -n "${JUPYTER_TOKEN:-}" ]]; then
+  JUPYTER_ARGS+=(--ServerApp.token="${JUPYTER_TOKEN}")
+else
+  # tokenless; set JUPYTER_TOKEN in template to require one
+  JUPYTER_ARGS+=(--ServerApp.token=)
+fi
+
+# 3) Start services
+/usr/sbin/sshd
+# Jupyter under 'runpod' user (activate venv, then launch Jupyter from venv)
+runuser -u runpod -- bash -lc "mkdir -p /workspace; source /usr/local/bin/activate_pangu.sh 2>/dev/null || true; /opt/pangu-venv/bin/jupyter lab ${JUPYTER_ARGS[*]}" &
+
+# nginx in foreground keeps the container alive
+exec nginx -g 'daemon off;'
+SH
+chmod +x /usr/local/bin/runpod-start.sh
+BASH
 
 # --- Defaults ---------------------------------------------------------------
 WORKDIR /workspace

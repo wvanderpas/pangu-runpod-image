@@ -60,22 +60,27 @@ RUN useradd -m -s /bin/bash runpod \
  && sed -i 's/^#\?PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config \
  && sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
 
-# --- nginx: proxy HTTP :80 -> Jupyter :8888 ----------------------------------
-RUN bash -lc 'cat > /etc/nginx/sites-available/jupyter.conf << "NG"\n\
-server {\n\
-  listen 80;\n\
-  server_name _;\n\
-  location / {\n\
-    proxy_pass http://127.0.0.1:8888;\n\
-    proxy_http_version 1.1;\n\
-    proxy_set_header Upgrade $http_upgrade;\n\
-    proxy_set_header Connection \"upgrade\";\n\
-    proxy_set_header Host $host;\n\
-  }\n\
-}\n\
-NG\n\
-&& rm -f /etc/nginx/sites-enabled/default \
-&& ln -s /etc/nginx/sites-available/jupyter.conf /etc/nginx/sites-enabled/jupyter.conf'
+# nginx: proxy HTTP :80 -> Jupyter :8888
+RUN <<'BASH'
+set -eux
+mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
+cat > /etc/nginx/sites-available/jupyter.conf <<'NG'
+server {
+  listen 80;
+  server_name _;
+  location / {
+    proxy_pass http://127.0.0.1:8888;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+  }
+}
+NG
+rm -f /etc/nginx/sites-enabled/default || true
+ln -sf /etc/nginx/sites-available/jupyter.conf /etc/nginx/sites-enabled/jupyter.conf
+BASH
+
 
 # --- Boot script: inject PUBLIC_KEY, set Jupyter auth, start services --------
 RUN bash -lc 'cat > /usr/local/bin/runpod-start.sh << "SH"\n\

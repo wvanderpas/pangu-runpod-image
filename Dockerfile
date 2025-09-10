@@ -27,7 +27,9 @@ RUN python3 -m venv /opt/pangu-venv \
  && /opt/pangu-venv/bin/pip install --upgrade pip setuptools wheel \
  && /opt/pangu-venv/bin/pip install --no-cache-dir \
       "onnxruntime-gpu[cuda,cudnn]" \
-      ai-models ai-models-panguweather ai-models-panguweather-gfs
+      ai-models ai-models-panguweather ai-models-panguweather-gfs \
+      matplotlib basemap basemap-data-hires 
+
 
 # --- Runtime helper: activate env & LD_LIBRARY_PATH for ONNX Runtime ---------
 RUN <<'BASH'

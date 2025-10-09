@@ -31,6 +31,13 @@ RUN python3 -m venv /opt/pangu-venv \
       matplotlib basemap basemap-data-hires 
 
 
+# --- Install your fork of ai-models-gfs (overrides the dependency) ----------  <-- (NEW)
+ARG AIMGFS_REPO=https://github.com/wvanderpas/ai-models-gfs                # <-- (NEW) put your fork URL
+ARG AIMGFS_REF=main                                                             # <-- (NEW) or pin to a commit hash
+RUN /opt/pangu-venv/bin/pip install --no-cache-dir --upgrade --force-reinstall \
+      "ai-models-gfs @ git+${AIMGFS_REPO}@${AIMGFS_REF}"                        # <-- (NEW)
+
+
 # --- Runtime helper: activate env & LD_LIBRARY_PATH for ONNX Runtime ---------
 RUN <<'BASH'
 set -eux

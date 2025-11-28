@@ -107,9 +107,3 @@ ENV PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 # No ports exposed; batch job only
 ENTRYPOINT ["/usr/bin/tini","--"]
 CMD ["/usr/local/bin/runpod-start.sh"]
-
-
-# Remove itself
-curl --silent --request DELETE \
---url "https://rest.runpod.io/v1/pods/$RUNPOD_POD_ID" \
---header "Authorization: Bearer $RUNPOD_API_KEY"

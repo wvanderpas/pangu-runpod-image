@@ -104,3 +104,11 @@ wait
 mv PANGUGFS_${DATE}${RUN}* "$GRIB_DIR/"
 
 echo "[DONE] Workflow completed for $DATE $RUN"
+sleep 100
+
+
+# Remove itself
+curl --silent --request DELETE \
+--url "https://rest.runpod.io/v1/pods/$RUNPOD_POD_ID" \
+--header "Authorization: Bearer $RUNPOD_API_KEY"
+

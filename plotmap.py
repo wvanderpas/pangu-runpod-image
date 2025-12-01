@@ -10,17 +10,12 @@ Plotting z500/mlsp
 
 import eccodes
 import numpy as np
-
 from mpl_toolkits.basemap import Basemap
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 from matplotlib.patches import Path, PathPatch
-
-
-
 import argparse
 from datetime import datetime, timedelta
-
 
 
 # setting some of the color maps of MetDesk 

@@ -71,7 +71,7 @@ cat > /usr/local/bin/runpod-start.sh <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT="/workspace/scripts/pangu-gfs-latest.sh"
+SCRIPT="/workspace/Runpod_viewer/pangu-gfs-latest.sh"
 
 # Ensure workspace exists (RunPod network volume usually mounts here)
 mkdir -p /workspace || true
